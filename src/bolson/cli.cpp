@@ -18,6 +18,7 @@
 #include <arrow/io/api.h>
 #include <arrow/ipc/api.h>
 #include <arrow/json/api.h>
+#include <illex/client.h>
 
 #include <algorithm>
 
