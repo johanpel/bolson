@@ -105,10 +105,10 @@ static auto CalcThreshold(size_t max_size, const std::shared_ptr<arrow::Schema>&
 
 using ParserMap = std::map<std::string, parse::Impl>;
 
-static void AddClientOpts(CLI::App* sub, std::string& host, uint16_t& port) {
-  sub->add_option("--host", host, "JSON source TCP server hostname.")
+static void AddClientOpts(CLI::App* sub, illex::ClientOptions* client) {
+  sub->add_option("--host", client->host, "JSON source TCP server hostname.")
       ->default_val("localhost");
-  sub->add_option("--port", port, "JSON source TCP server port.")
+  sub->add_option("--port", client->port, "JSON source TCP server port.")
       ->default_val(ILLEX_DEFAULT_PORT);
 }
 
@@ -172,7 +172,7 @@ static void AddBenchOpts(CLI::App* bench, BenchOptions* out, std::string* schema
   // 'bench client' subcommand.
   auto* bench_client =
       bench->add_subcommand("client", "Run TCP client interface microbenchmark.");
-  AddClientOpts(bench_client, out->client.host, out->client.port);
+  AddClientOpts(bench_client, &out->client);
 
   // 'bench convert' subcommand.
   auto* bench_conv =
@@ -215,6 +215,7 @@ auto AppOptions::FromArguments(int argc, char** argv, AppOptions* out) -> Status
   AddConvertOpts(stream, &out->stream.converter);
   AddArrowOpts(stream, &schema_file);
   AddPublishOpts(stream, &out->stream.pulsar);
+  AddClientOpts(stream, &out->stream.client);
 
   // 'bench' subcommand:
   auto* bench =
