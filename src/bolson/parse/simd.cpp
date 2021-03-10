@@ -174,6 +174,55 @@ auto ArrowDOMWalker::AppendArrayAsList(const sj::dom::array& array,
   return Status::OK();
 }
 
+auto ArrowDOMWalker::AppendArrayAsFixedSizeList(const sj::dom::array& array,
+                                                const ArrowField& item_field,
+                                                arrow::FixedSizeListBuilder* fsl_builder)
+    -> Status {
+  assert(fsl_builder != nullptr);
+
+  // Sanity check size.
+  size_t expected_size =
+      std::static_pointer_cast<arrow::FixedSizeListType>(fsl_builder->type())
+          ->list_size();
+  if (array.size() != expected_size) {
+    return Status(Error::SimdError, "JSON array contained " +
+                                        std::to_string(array.size()) +
+                                        " items, but FixedSizeList requires " +
+                                        std::to_string(expected_size));
+  }
+
+  ARROW_ROE(fsl_builder->Append());
+  ARROW_ROE(fsl_builder->value_builder()->Reserve(array.size()));
+
+  if (arrow::is_primitive(item_field->type()->id())) {
+    // Lists of primitives:
+    switch (item_field->type()->id()) {
+      default:
+        return Status(Error::SimdError,
+                      "Appending primitives of type " + item_field->type()->name() +
+                          " to list from JSON array is not supported or implemented.");
+      case arrow::Type::UINT64: {
+        auto* bld = dynamic_cast<arrow::UInt64Builder*>(fsl_builder->value_builder());
+        for (const sj::dom::element& elem : array) {
+          bld->UnsafeAppend(elem.get_uint64());
+        }
+      } break;
+      case arrow::Type::INT64: {
+        auto* bld = dynamic_cast<arrow::Int64Builder*>(fsl_builder->value_builder());
+        for (const sj::dom::element& elem : array) {
+          bld->UnsafeAppend(elem.get_int64());
+        }
+      } break;
+    }
+  } else {
+    // Lists of anything else:
+    for (const sj::dom::element& elem : array) {
+      BOLSON_ROE(AppendElement(elem, item_field, fsl_builder->value_builder()));
+    }
+  }
+  return Status::OK();
+}
+
 auto ArrowDOMWalker::AppendObjectAsStruct(const sj::dom::object& object,
                                           const ArrowFields& expected_fields,
                                           arrow::StructBuilder* struct_builder)
@@ -214,11 +263,17 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
       switch (expected_field->type()->id()) {
         default:
           return TypeErrorStatus(element.type(), *expected_field->type());
-        case arrow::Type::LIST:
+        case arrow::Type::LIST: {
           auto* list_builder = dynamic_cast<arrow::ListBuilder*>(builder);
           auto item_field = expected_field->type()->field(0);
           BOLSON_ROE(AppendArrayAsList(element.get_array(), item_field, list_builder));
-          break;
+        } break;
+        case arrow::Type::FIXED_SIZE_LIST: {
+          auto* fsl_builder = dynamic_cast<arrow::FixedSizeListBuilder*>(builder);
+          auto item_field = expected_field->type()->field(0);
+          BOLSON_ROE(
+              AppendArrayAsFixedSizeList(element.get_array(), item_field, fsl_builder));
+        } break;
       }
     } break;
     case sj::dom::element_type::OBJECT: {
@@ -281,6 +336,7 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
               dynamic_cast<arrow::BooleanBuilder*>(builder)->Append(element.get_bool()));
           break;
       }
+      break;
     case sj::dom::element_type::NULL_VALUE:
       return Status(Error::SimdError, "Null value not implemented.");
   }
@@ -300,8 +356,15 @@ auto ArrowDOMWalker::AppendObjectAsRecord(const sj::dom::object& object,
 
   size_t i = 0;
   for (const auto& member : object) {
-    BOLSON_ROE(AppendElement(member.value, batch_builder->schema()->field(i),
-                             batch_builder->GetField(i)));
+    auto status = AppendElement(member.value, batch_builder->schema()->field(i),
+                                batch_builder->GetField(i));
+    if (!status.ok()) {
+      std::stringstream ss;
+      ss << "Encountered problem: " << status.msg() << std::endl;
+      ss << "  when appending member: " << member.key << std::endl;
+      ss << "  from object: " << std::endl << object << std::endl;
+      return Status(Error::SimdError, ss.str());
+    }
     i++;
   }
   return Status::OK();

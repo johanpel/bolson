@@ -83,6 +83,10 @@ class ArrowDOMWalker {
                                               const ArrowField& item_field,
                                               arrow::ListBuilder* list_builder) -> Status;
 
+  [[nodiscard]] static auto AppendArrayAsFixedSizeList(
+      const simdjson::dom::array& array, const ArrowField& item_field,
+      arrow::FixedSizeListBuilder* list_builder) -> Status;
+
   [[nodiscard]] static auto AppendObjectAsStruct(const simdjson::dom::object& object,
                                                  const ArrowFields& expected_fields,
                                                  arrow::StructBuilder* struct_builder)
