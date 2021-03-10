@@ -62,12 +62,12 @@ class ArrowDOMWalker {
   static auto Make(const std::shared_ptr<arrow::Schema>& schema,
                    std::shared_ptr<ArrowDOMWalker>* out) -> Status;
 
-  inline auto Append(const simdjson::dom::object& object) {
+  [[nodiscard]] inline auto Append(const simdjson::dom::object& object) {
     BOLSON_ROE(AppendObjectAsRecord(object, batch_builder.get()));
     return Status::OK();
   }
 
-  inline auto Finish(std::shared_ptr<arrow::RecordBatch>* out) -> Status {
+  [[nodiscard]] inline auto Finish(std::shared_ptr<arrow::RecordBatch>* out) -> Status {
     ARROW_ROE(batch_builder->Flush(out));
     return Status::OK();
   }
@@ -75,20 +75,22 @@ class ArrowDOMWalker {
  protected:
   ArrowDOMWalker() = default;
 
-  static auto AppendElement(const simdjson::dom::element& element,
-                            const ArrowField& expected_field,
-                            arrow::ArrayBuilder* builder) -> Status;
+  [[nodiscard]] static auto AppendElement(const simdjson::dom::element& element,
+                                          const ArrowField& expected_field,
+                                          arrow::ArrayBuilder* builder) -> Status;
 
-  static auto AppendArrayAsList(const simdjson::dom::array& array,
-                                const ArrowField& item_field,
-                                arrow::ListBuilder* list_builder) -> Status;
+  [[nodiscard]] static auto AppendArrayAsList(const simdjson::dom::array& array,
+                                              const ArrowField& item_field,
+                                              arrow::ListBuilder* list_builder) -> Status;
 
-  static auto AppendObjectAsStruct(const simdjson::dom::object& object,
-                                   const ArrowFields& expected_fields,
-                                   arrow::StructBuilder* struct_builder) -> Status;
+  [[nodiscard]] static auto AppendObjectAsStruct(const simdjson::dom::object& object,
+                                                 const ArrowFields& expected_fields,
+                                                 arrow::StructBuilder* struct_builder)
+      -> Status;
 
-  static auto AppendObjectAsRecord(const simdjson::dom::object& object,
-                                   arrow::RecordBatchBuilder* batch_builder) -> Status;
+  [[nodiscard]] static auto AppendObjectAsRecord(const simdjson::dom::object& object,
+                                                 arrow::RecordBatchBuilder* batch_builder)
+      -> Status;
 
   std::unique_ptr<arrow::RecordBatchBuilder> batch_builder;
 };

@@ -81,6 +81,7 @@ inline auto ToString(const Impl& impl) -> std::string {
     case Impl::SIMD_BATTERY:
       return "simdjson battery status (CPU)";
   }
+  return "Corrupt Impl";
 }
 
 }  // namespace bolson::parse

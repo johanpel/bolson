@@ -50,11 +50,11 @@ auto SimdParser::Parse(const std::vector<illex::JSONBuffer*>& in,
         parser.parse_many(reinterpret_cast<const uint8_t*>(buf->data()), buf->size());
 
     for (auto obj : objects) {
-      walker->Append(obj);
+      BOLSON_ROE(walker->Append(obj));
     }
 
     std::shared_ptr<arrow::RecordBatch> batch_out;
-    walker->Finish(&batch_out);
+    BOLSON_ROE(walker->Finish(&batch_out));
 
     out->push_back(ParsedBatch(batch_out, buf->range()));
   }
@@ -145,8 +145,31 @@ auto ArrowDOMWalker::AppendArrayAsList(const sj::dom::array& array,
   ARROW_ROE(list_builder->Append());
   ARROW_ROE(list_builder->value_builder()->Reserve(array.size()));
 
-  for (const sj::dom::element& elem : array) {
-    AppendElement(elem, item_field, list_builder->value_builder());
+  if (arrow::is_primitive(item_field->type()->id())) {
+    // Lists of primitives:
+    switch (item_field->type()->id()) {
+      default:
+        return Status(Error::SimdError,
+                      "Appending primitives of type " + item_field->type()->name() +
+                          " to list from JSON array is not supported or implemented.");
+      case arrow::Type::UINT64: {
+        auto* bld = dynamic_cast<arrow::UInt64Builder*>(list_builder->value_builder());
+        for (const sj::dom::element& elem : array) {
+          bld->UnsafeAppend(elem.get_uint64());
+        }
+      } break;
+      case arrow::Type::INT64: {
+        auto* bld = dynamic_cast<arrow::Int64Builder*>(list_builder->value_builder());
+        for (const sj::dom::element& elem : array) {
+          bld->UnsafeAppend(elem.get_int64());
+        }
+      } break;
+    }
+  } else {
+    // Lists of anything else:
+    for (const sj::dom::element& elem : array) {
+      BOLSON_ROE(AppendElement(elem, item_field, list_builder->value_builder()));
+    }
   }
   return Status::OK();
 }
@@ -168,11 +191,17 @@ auto ArrowDOMWalker::AppendObjectAsStruct(const sj::dom::object& object,
 
   for (size_t i = 0; i < expected_fields.size(); i++) {
     auto elem = object.at_key(expected_fields[i]->name());
-    AppendElement(elem.value_unsafe(), expected_fields[i],
-                  struct_builder->child_builder(i).get());
+    BOLSON_ROE(AppendElement(elem.value_unsafe(), expected_fields[i],
+                             struct_builder->child_builder(i).get()));
   }
   return Status::OK();
 }
+
+#define BOLSON_SIMD_PRIM_CASE(ARROW_TYPE, BUILDER_TYPE, C_TYPE) \
+  case ARROW_TYPE: {                                            \
+    ARROW_ROE(dynamic_cast<BUILDER_TYPE*>(builder)->Append(     \
+        static_cast<C_TYPE>(element.get_int64())));             \
+  } break;
 
 auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
                                    const ArrowField& expected_field,
@@ -199,58 +228,23 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
     } break;
     case sj::dom::element_type::INT64: {
       switch (expected_field->type()->id()) {
+        BOLSON_SIMD_PRIM_CASE(arrow::Type::UINT8, arrow::UInt8Builder, uint8_t);
+        BOLSON_SIMD_PRIM_CASE(arrow::Type::UINT16, arrow::UInt16Builder, uint16_t);
+        BOLSON_SIMD_PRIM_CASE(arrow::Type::UINT32, arrow::UInt32Builder, uint32_t);
+        BOLSON_SIMD_PRIM_CASE(arrow::Type::UINT64, arrow::UInt64Builder, uint64_t);
+        BOLSON_SIMD_PRIM_CASE(arrow::Type::INT8, arrow::Int8Builder, int8_t);
+        BOLSON_SIMD_PRIM_CASE(arrow::Type::INT16, arrow::Int16Builder, int16_t);
+        BOLSON_SIMD_PRIM_CASE(arrow::Type::INT32, arrow::Int32Builder, int32_t);
+        BOLSON_SIMD_PRIM_CASE(arrow::Type::INT64, arrow::Int64Builder, int64_t);
         default:
           return TypeErrorStatus(element.type(), *expected_field->type());
-        case arrow::Type::INT8:
-          ARROW_ROE(dynamic_cast<arrow::Int8Builder*>(builder)->Append(
-              static_cast<int8_t>(element.get_int64())));
-          break;
-        case arrow::Type::INT16:
-          ARROW_ROE(dynamic_cast<arrow::Int16Builder*>(builder)->Append(
-              static_cast<int16_t>(element.get_int64())));
-          break;
-        case arrow::Type::INT32:
-          ARROW_ROE(dynamic_cast<arrow::Int32Builder*>(builder)->Append(
-              static_cast<int32_t>(element.get_int64())));
-          break;
-        case arrow::Type::INT64:
-          ARROW_ROE(dynamic_cast<arrow::Int64Builder*>(builder)->Append(
-              static_cast<int64_t>(element.get_int64())));
-          break;
-        case arrow::Type::UINT8:
-          ARROW_ROE(dynamic_cast<arrow::UInt8Builder*>(builder)->Append(
-              static_cast<uint8_t>(element.get_uint64())));
-          break;
-        case arrow::Type::UINT16:
-          ARROW_ROE(dynamic_cast<arrow::UInt16Builder*>(builder)->Append(
-              static_cast<uint16_t>(element.get_uint64())));
-          break;
-        case arrow::Type::UINT32:
-          ARROW_ROE(dynamic_cast<arrow::UInt32Builder*>(builder)->Append(
-              static_cast<uint32_t>(element.get_uint64())));
-          break;
-        case arrow::Type::UINT64:
-          ARROW_ROE(dynamic_cast<arrow::UInt64Builder*>(builder)->Append(
-              static_cast<uint64_t>(element.get_uint64())));
-          break;
       }
     } break;
     case sj::dom::element_type::UINT64: {
+      // From simdjson docs: uint64_t: any integer that fits in uint64_t but *not* int64_t
       switch (expected_field->type()->id()) {
         default:
           return TypeErrorStatus(element.type(), *expected_field->type());
-        case arrow::Type::UINT8:
-          ARROW_ROE(dynamic_cast<arrow::UInt8Builder*>(builder)->Append(
-              static_cast<uint8_t>(element.get_uint64())));
-          break;
-        case arrow::Type::UINT16:
-          ARROW_ROE(dynamic_cast<arrow::UInt16Builder*>(builder)->Append(
-              static_cast<uint16_t>(element.get_uint64())));
-          break;
-        case arrow::Type::UINT32:
-          ARROW_ROE(dynamic_cast<arrow::UInt32Builder*>(builder)->Append(
-              static_cast<uint32_t>(element.get_uint64())));
-          break;
         case arrow::Type::UINT64:
           ARROW_ROE(dynamic_cast<arrow::UInt64Builder*>(builder)->Append(
               static_cast<uint64_t>(element.get_uint64())));
@@ -279,11 +273,19 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
       }
     } break;
     case sj::dom::element_type::BOOL:
+      switch (expected_field->type()->id()) {
+        default:
+          return TypeErrorStatus(element.type(), *expected_field->type());
+        case arrow::Type::BOOL:
+          ARROW_ROE(
+              dynamic_cast<arrow::BooleanBuilder*>(builder)->Append(element.get_bool()));
+          break;
+      }
     case sj::dom::element_type::NULL_VALUE:
-      return Status(Error::SimdError, "Not implemented.");
+      return Status(Error::SimdError, "Null value not implemented.");
   }
   return Status::OK();
-}
+}  // namespace bolson::parse
 
 auto ArrowDOMWalker::AppendObjectAsRecord(const sj::dom::object& object,
                                           arrow::RecordBatchBuilder* batch_builder)
