@@ -47,7 +47,7 @@ struct ArrowOptions {
   /// Number of input buffers to use.
   size_t num_buffers = 0;
   /// Capacity of input buffers.
-  size_t buf_capacity = 16 * 1024 * 1024;
+  size_t buf_capacity = 256 * 1024 * 1024;
   /// Whether to store sequence numbers as a column.
   bool seq_column = true;
 

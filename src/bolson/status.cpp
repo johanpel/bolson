@@ -49,6 +49,8 @@ auto ToString(Error e) -> std::string {
       return "IOError";
     case Error::OpaeError:
       return "OpaeError";
+    case Error::SimdError:
+      return "SimdError";
   }
   return "Error enum value corrupted.";
 }

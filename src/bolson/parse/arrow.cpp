@@ -173,7 +173,7 @@ void AddArrowOptionsToCLI(CLI::App* sub, ArrowOptions* out) {
                   "Serialized Arrow schema file for records to convert to.")
       ->check(CLI::ExistingFile);
   sub->add_option("--arrow-buf-cap", out->buf_capacity, "Arrow input buffer capacity.")
-      ->default_val(16 * 1024 * 1024);
+      ->default_val(256 * 1024 * 1024);
   sub->add_flag(
          "--arrow-seq-col", out->seq_column,
          "Arrow parser, retain ordering information by adding a sequence number column.")

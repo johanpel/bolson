@@ -27,6 +27,7 @@
 #include "bolson/parse/opae/battery.h"
 #include "bolson/parse/opae/trip.h"
 #include "bolson/parse/parser.h"
+#include "bolson/parse/simd/battery.h"
 #include "bolson/publish/publisher.h"
 #include "bolson/status.h"
 

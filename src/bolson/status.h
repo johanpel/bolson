@@ -29,7 +29,8 @@ enum class Error {
   IllexError,    ///< Errors related to Illex.
   ArrowError,    ///< Errors related to Arrow.
   IOError,       ///< Errors related to input/output.
-  OpaeError      ///< Errors related to FPGA impl.
+  OpaeError,     ///< Errors related to FPGA impl.
+  SimdError      ///< Errors related to the simdjson impl.
 };
 
 /// \brief Return human-readable Error enum.

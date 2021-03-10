@@ -27,6 +27,17 @@ if (NOT rapidjson_POPULATED)
 endif ()
 include_directories("${rapidjson_SOURCE_DIR}/include")
 
+FetchContent_Declare(
+  simdjson
+  GIT_REPOSITORY https://github.com/simdjson/simdjson.git
+  GIT_TAG v0.8.2
+  GIT_SHALLOW TRUE)
+set(SIMDJSON_JUST_LIBRARY ON CACHE INTERNAL "")
+set(SIMDJSON_BUILD_STATIC ON CACHE INTERNAL "")
+set(SIMDJSON_ENABLE_THREADS OFF CACHE INTERNAL "")
+
+FetchContent_MakeAvailable(simdjson)
+
 # CLI11
 FetchContent_Declare(CLI11
   GIT_REPOSITORY  https://github.com/CLIUtils/CLI11.git
@@ -98,12 +109,15 @@ add_compile_unit(
     src/bolson/parse/opae/battery.cpp
     src/bolson/parse/opae/opae.cpp
     src/bolson/parse/opae/trip.cpp
+    src/bolson/parse/simd/battery.cpp
+    src/bolson/parse/simd/simd.cpp
     src/bolson/publish/bench.cpp
     src/bolson/publish/metrics.cpp
     src/bolson/publish/publisher.cpp
   TSTS
     test/bolson/convert/test_opae_battery.cpp
     test/bolson/convert/test_opae_trip.cpp
+    test/bolson/convert/test_simd.cpp
   DEPS
     arrow_shared
     CLI11::CLI11
@@ -113,6 +127,7 @@ add_compile_unit(
     illex::static
     putong
     fletcher
+    simdjson
 )
 
 add_compile_unit(

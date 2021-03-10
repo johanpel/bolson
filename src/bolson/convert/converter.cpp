@@ -376,11 +376,16 @@ auto Converter::Make(const ConverterOptions& opts, publish::IpcQueue* ipc_queue,
                                                  &parser_context));
       break;
     case parse::Impl::OPAE_BATTERY:
-      BOLSON_ROE(
-          parse::opae::BatteryParserContext::Make(opts.parser.battery, &parser_context));
+      BOLSON_ROE(parse::opae::BatteryParserContext::Make(opts.parser.opae_battery,
+                                                         &parser_context));
       break;
     case parse::Impl::OPAE_TRIP:
-      BOLSON_ROE(parse::opae::TripParserContext::Make(opts.parser.trip, &parser_context));
+      BOLSON_ROE(
+          parse::opae::TripParserContext::Make(opts.parser.opae_trip, &parser_context));
+      break;
+    case parse::Impl::SIMD_BATTERY:
+      parse::simd::BatteryParserContext::Make(opts.parser.simd_battery, opts.num_threads,
+                                              &parser_context);
       break;
   }
 
