@@ -182,9 +182,9 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
   switch (element.type()) {
     case sj::dom::element_type::ARRAY: {
       // list or fixed size list builder
-      switch (builder->type()->id()) {
+      switch (expected_field->type()->id()) {
         default:
-          return TypeErrorStatus(element.type(), *builder->type());
+          return TypeErrorStatus(element.type(), *expected_field->type());
         case arrow::Type::LIST:
           auto* list_builder = dynamic_cast<arrow::ListBuilder*>(builder);
           auto item_field = expected_field->type()->field(0);
@@ -198,9 +198,9 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
                                       expected_field->type()->fields(), struct_builder));
     } break;
     case sj::dom::element_type::INT64: {
-      switch (builder->type()->id()) {
+      switch (expected_field->type()->id()) {
         default:
-          return TypeErrorStatus(element.type(), *builder->type());
+          return TypeErrorStatus(element.type(), *expected_field->type());
         case arrow::Type::INT8:
           ARROW_ROE(dynamic_cast<arrow::Int8Builder*>(builder)->Append(
               static_cast<int8_t>(element.get_int64())));
@@ -236,9 +236,9 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
       }
     } break;
     case sj::dom::element_type::UINT64: {
-      switch (builder->type()->id()) {
+      switch (expected_field->type()->id()) {
         default:
-          return TypeErrorStatus(element.type(), *builder->type());
+          return TypeErrorStatus(element.type(), *expected_field->type());
         case arrow::Type::UINT8:
           ARROW_ROE(dynamic_cast<arrow::UInt8Builder*>(builder)->Append(
               static_cast<uint8_t>(element.get_uint64())));
@@ -258,9 +258,9 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
       }
     } break;
     case sj::dom::element_type::DOUBLE: {
-      switch (builder->type()->id()) {
+      switch (expected_field->type()->id()) {
         default:
-          return TypeErrorStatus(element.type(), *builder->type());
+          return TypeErrorStatus(element.type(), *expected_field->type());
         case arrow::Type::DOUBLE:
           ARROW_ROE(dynamic_cast<arrow::DoubleBuilder*>(builder)->Append(
               static_cast<double_t>(element.get_double())));
@@ -268,9 +268,9 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
       }
     } break;
     case sj::dom::element_type::STRING: {
-      switch (builder->type()->id()) {
+      switch (expected_field->type()->id()) {
         default:
-          return TypeErrorStatus(element.type(), *builder->type());
+          return TypeErrorStatus(element.type(), *expected_field->type());
         case arrow::Type::STRING:
           auto* sb = dynamic_cast<arrow::StringBuilder*>(builder);
           auto str = element.get_string().value_unsafe();  // previously checked to be str
@@ -296,10 +296,11 @@ auto ArrowDOMWalker::AppendObjectAsRecord(const sj::dom::object& object,
                       std::to_string(batch_builder->schema()->num_fields()));
   }
 
-  for (size_t i = 0; i < batch_builder->schema()->num_fields(); i++) {
-    auto elem = object.at_key(batch_builder->schema()->field(i)->name());
-    BOLSON_ROE(AppendElement(elem.value_unsafe(), batch_builder->schema()->field(i),
+  size_t i = 0;
+  for (const auto& member : object) {
+    BOLSON_ROE(AppendElement(member.value, batch_builder->schema()->field(i),
                              batch_builder->GetField(i)));
+    i++;
   }
   return Status::OK();
 }

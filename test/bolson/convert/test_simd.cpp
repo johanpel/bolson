@@ -68,4 +68,12 @@ TEST(Simd, Battery) {
   std::cout << batch->ToString() << std::endl;
 }
 
+struct DOMNode {
+  
+};
+
+TEST(Simd, DOMWalkerSequence) {
+
+}
+
 }  // namespace bolson::convert
