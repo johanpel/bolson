@@ -12,57 +12,61 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bolson/parse/simd/simd.h"
+#include "bolson/parse/simd.h"
 
 #include <simdjson.h>
 
 #include <memory>
 
 #include "bolson/log.h"
+#include "bolson/parse/arrow.h"
 
-namespace bolson::parse::simd {
+namespace bolson::parse {
 
 namespace sj = simdjson;
 
+void AddSimdOptionsToCLI(CLI::App* sub, SimdOptions* out) {
+  // TODO: figure something out for options common with other impls
+  sub->add_option("--simd-input", out->schema_path,
+                  "Serialized Arrow schema file for records to convert to.")
+      ->check(CLI::ExistingFile);
+  sub->add_option("--simd-buf-cap", out->buf_capacity, "simdjson input buffer capacity.")
+      ->default_val(256 * 1024 * 1024);
+  sub->add_flag("--simd-seq-col", out->seq_column,
+                "simdjson parser, retain ordering information by adding a sequence "
+                "number column.")
+      ->default_val(false);
+}
+
+auto SimdOptions::ReadSchema() -> Status {
+  BOLSON_ROE(ReadSchemaFromFile(schema_path, &schema));
+  return Status::OK();
+}
+
 auto SimdParser::Parse(const std::vector<illex::JSONBuffer*>& in,
                        std::vector<ParsedBatch>* out) -> Status {
-  namespace sj = simdjson;
-  sj::dom::parser parser;
-
   for (const auto& buf : in) {
-    auto val_bld = std::make_shared<arrow::UInt64Builder>();
-    arrow::ListBuilder lst_bld(arrow::default_memory_pool(), val_bld);
-
-    sj::dom::document_stream docs =
+    sj::dom::document_stream objects =
         parser.parse_many(reinterpret_cast<const uint8_t*>(buf->data()), buf->size());
 
-    size_t i = 0;
-    for (auto doc : docs) {  // For each object
-      ARROW_ROE(lst_bld.Append());
-      auto array = doc["voltage"].get_array();
-      if (array.error()) {
-        return Status(Error::SimdError, sj::error_message(array.error()));
-      }
-      ARROW_ROE(val_bld->Reserve(array.size()));
-      for (const auto& item : array) {
-        auto val = item.get_uint64();
-        if (val.error()) {
-          return Status(Error::SimdError, sj::error_message(array.error()));
-        }
-        val_bld->UnsafeAppend(val.value());
-      }
+    for (auto obj : objects) {
+      walker->Append(obj);
     }
 
-    std::shared_ptr<arrow::ListArray> col;
-    ARROW_ROE(lst_bld.Finish(&col));
+    std::shared_ptr<arrow::RecordBatch> batch_out;
+    walker->Finish(&batch_out);
 
-    out->push_back(ParsedBatch(
-        arrow::RecordBatch::Make(
-            arrow::schema({arrow::field("voltage", arrow::list(arrow::uint64()), false)}),
-            col->length(), {col}),
-        buf->range()));
+    out->push_back(ParsedBatch(batch_out, buf->range()));
   }
 
+  return Status::OK();
+}
+
+auto SimdParser::Make(const std::shared_ptr<arrow::Schema>& schema,
+                      std::shared_ptr<SimdParser>* out) -> Status {
+  auto result = std::shared_ptr<SimdParser>(new SimdParser());
+  BOLSON_ROE(ArrowDOMWalker::Make(schema, &result->walker));
+  *out = result;
   return Status::OK();
 }
 
@@ -73,9 +77,20 @@ auto SimdParserContext::Make(const SimdOptions& opts, size_t num_parsers,
   // Use default allocator.
   result->allocator_ = std::make_shared<buffer::Allocator>();
 
+  // Determine simdjson parser options.
+  if (opts.schema == nullptr) {
+    BOLSON_ROE(ReadSchemaFromFile(opts.schema_path, &result->schema_));
+  } else {
+    result->schema_ = opts.schema;
+  }
+
   // Initialize all parsers.
-  result->parsers_ = std::vector<std::shared_ptr<SimdParser>>(
-      num_parsers, std::make_shared<SimdParser>());
+  for (size_t i = 0; i < num_parsers; i++) {
+    std::shared_ptr<SimdParser> p;
+    BOLSON_ROE(SimdParser::Make(result->schema_, &p));
+    result->parsers_.push_back(p);
+  }
+
   *out = std::static_pointer_cast<ParserContext>(result);
 
   // Allocate buffers. Use number of parsers if number of buffers is 0 in options.
@@ -94,23 +109,23 @@ auto SimdParserContext::schema() const -> std::shared_ptr<arrow::Schema> {
   return arrow::schema({arrow::field("voltage", arrow::uint64(), false)});
 }
 
-inline std::string ToString(sj::dom::element_type type) {
+inline auto ToString(sj::dom::element_type type) -> std::string {
   switch (type) {
-    case simdjson::dom::element_type::ARRAY:
+    case sj::dom::element_type::ARRAY:
       return "array";
-    case simdjson::dom::element_type::OBJECT:
+    case sj::dom::element_type::OBJECT:
       return "object";
-    case simdjson::dom::element_type::INT64:
+    case sj::dom::element_type::INT64:
       return "int64";
-    case simdjson::dom::element_type::UINT64:
+    case sj::dom::element_type::UINT64:
       return "uint64";
-    case simdjson::dom::element_type::DOUBLE:
+    case sj::dom::element_type::DOUBLE:
       return "double";
-    case simdjson::dom::element_type::STRING:
+    case sj::dom::element_type::STRING:
       return "string";
-    case simdjson::dom::element_type::BOOL:
+    case sj::dom::element_type::BOOL:
       return "bool";
-    case simdjson::dom::element_type::NULL_VALUE:
+    case sj::dom::element_type::NULL_VALUE:
       return "null";
   }
   return "CORRUPT TYPE";
@@ -165,7 +180,7 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
   assert(builder != nullptr);
 
   switch (element.type()) {
-    case simdjson::dom::element_type::ARRAY: {
+    case sj::dom::element_type::ARRAY: {
       // list or fixed size list builder
       switch (builder->type()->id()) {
         default:
@@ -177,12 +192,12 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
           break;
       }
     } break;
-    case simdjson::dom::element_type::OBJECT: {
+    case sj::dom::element_type::OBJECT: {
       auto* struct_builder = dynamic_cast<arrow::StructBuilder*>(builder);
       BOLSON_ROE(AppendObjectAsStruct(element.get_object(),
                                       expected_field->type()->fields(), struct_builder));
     } break;
-    case simdjson::dom::element_type::INT64: {
+    case sj::dom::element_type::INT64: {
       switch (builder->type()->id()) {
         default:
           return TypeErrorStatus(element.type(), *builder->type());
@@ -220,7 +235,7 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
           break;
       }
     } break;
-    case simdjson::dom::element_type::UINT64: {
+    case sj::dom::element_type::UINT64: {
       switch (builder->type()->id()) {
         default:
           return TypeErrorStatus(element.type(), *builder->type());
@@ -242,7 +257,7 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
           break;
       }
     } break;
-    case simdjson::dom::element_type::DOUBLE: {
+    case sj::dom::element_type::DOUBLE: {
       switch (builder->type()->id()) {
         default:
           return TypeErrorStatus(element.type(), *builder->type());
@@ -252,7 +267,7 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
           break;
       }
     } break;
-    case simdjson::dom::element_type::STRING: {
+    case sj::dom::element_type::STRING: {
       switch (builder->type()->id()) {
         default:
           return TypeErrorStatus(element.type(), *builder->type());
@@ -263,8 +278,8 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
           break;
       }
     } break;
-    case simdjson::dom::element_type::BOOL:
-    case simdjson::dom::element_type::NULL_VALUE:
+    case sj::dom::element_type::BOOL:
+    case sj::dom::element_type::NULL_VALUE:
       return Status(Error::SimdError, "Not implemented.");
   }
   return Status::OK();
@@ -298,4 +313,4 @@ auto ArrowDOMWalker::Make(const std::shared_ptr<arrow::Schema>& schema,
   return Status::OK();
 }
 
-}  // namespace bolson::parse::simd
+}  // namespace bolson::parse

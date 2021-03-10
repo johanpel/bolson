@@ -19,6 +19,7 @@
 #include "bolson/parse/arrow.h"
 #include "bolson/parse/opae/battery.h"
 #include "bolson/parse/opae/trip.h"
+#include "bolson/parse/simd.h"
 #include "bolson/parse/simd/battery.h"
 
 namespace bolson::parse {
@@ -28,6 +29,7 @@ enum class Impl {
   ARROW,         ///< A CPU version based on Arrow's internal JSON parser using RapidJSON.
   OPAE_BATTERY,  ///< An FPGA version for the "battery status" schema.
   OPAE_TRIP,     ///< An FPGA version for for the "trip report" schema.
+  SIMD,          ///< simdjson for any schema
   SIMD_BATTERY,  ///< simdjson version for the "battery status schema.
 };
 
@@ -36,6 +38,7 @@ struct ParserOptions {
   // Would have been nice to use a variant, but it doesn't work nicely with the CLI stuff.
   Impl impl = Impl::ARROW;
   ArrowOptions arrow;
+  SimdOptions simd;
   opae::BatteryOptions opae_battery;
   opae::TripOptions opae_trip;
   simd::BatteryOptions simd_battery;
@@ -45,6 +48,7 @@ struct ParserOptions {
         {"arrow", parse::Impl::ARROW},
         {"opae-battery", parse::Impl::OPAE_BATTERY},
         {"opae-trip", parse::Impl::OPAE_TRIP},
+        {"simd", parse::Impl::SIMD},
         {"simd-battery", parse::Impl::SIMD_BATTERY}};
 
     return result;
@@ -59,6 +63,7 @@ inline void AddParserOptions(CLI::App* sub, ParserOptions* opts) {
       ->default_val(parse::Impl::ARROW);
 
   parse::AddArrowOptionsToCLI(sub, &opts->arrow);
+  parse::AddSimdOptionsToCLI(sub, &opts->simd);
   parse::opae::AddBatteryOptionsToCLI(sub, &opts->opae_battery);
   parse::opae::AddTripOptionsToCLI(sub, &opts->opae_trip);
 }
@@ -67,6 +72,8 @@ inline auto ToString(const Impl& impl) -> std::string {
   switch (impl) {
     case Impl::ARROW:
       return "Arrow (CPU)";
+    case Impl::SIMD:
+      return "simdjson (CPU)";
     case Impl::OPAE_BATTERY:
       return "OPAE battery status (FPGA)";
     case Impl::OPAE_TRIP:
@@ -74,8 +81,6 @@ inline auto ToString(const Impl& impl) -> std::string {
     case Impl::SIMD_BATTERY:
       return "simdjson battery status (CPU)";
   }
-  // C++ why
-  return "Corrupt bolson::parse::Impl enum value.";
 }
 
 }  // namespace bolson::parse

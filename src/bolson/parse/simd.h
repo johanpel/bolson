@@ -25,7 +25,7 @@
 #include "bolson/parse/parser.h"
 #include "bolson/status.h"
 
-namespace bolson::parse::simd {
+namespace bolson::parse {
 
 // Macro to convert simdjson result to Bolson status.
 #define SIMD_ROE(x)                                                         \
@@ -36,6 +36,7 @@ namespace bolson::parse::simd {
     }                                                                       \
   }
 
+/// \brief Options for SimdJSON parser.
 struct SimdOptions {
   /// Arrow schema.
   std::shared_ptr<arrow::Schema> schema = nullptr;
@@ -47,30 +48,11 @@ struct SimdOptions {
   size_t buf_capacity = 256 * 1024 * 1024;
   /// Whether to store sequence numbers as a column.
   bool seq_column = true;
+
+  auto ReadSchema() -> Status;
 };
 
 void AddSimdOptionsToCLI(CLI::App* sub, SimdOptions* out);
-
-class SimdParser : public Parser {
- public:
-  auto Parse(const std::vector<illex::JSONBuffer*>& in, std::vector<ParsedBatch>* out)
-      -> Status override;
-};
-
-class SimdParserContext : public ParserContext {
- public:
-  static auto Make(const SimdOptions& opts, size_t num_parsers,
-                   std::shared_ptr<ParserContext>* out) -> Status;
-
-  auto parsers() -> std::vector<std::shared_ptr<Parser>> override;
-
-  [[nodiscard]] auto schema() const -> std::shared_ptr<arrow::Schema> override;
-
- private:
-  SimdParserContext() = default;
-
-  std::vector<std::shared_ptr<SimdParser>> parsers_;
-};
 
 class ArrowDOMWalker {
  public:
@@ -111,4 +93,35 @@ class ArrowDOMWalker {
   std::unique_ptr<arrow::RecordBatchBuilder> batch_builder;
 };
 
-}  // namespace bolson::parse::simd
+class SimdParser : public Parser {
+ public:
+  static auto Make(const std::shared_ptr<arrow::Schema>& schema,
+                   std::shared_ptr<SimdParser>* out) -> Status;
+
+  auto Parse(const std::vector<illex::JSONBuffer*>& in, std::vector<ParsedBatch>* out)
+      -> Status override;
+
+ protected:
+  SimdParser() = default;
+
+  simdjson::dom::parser parser;
+  std::shared_ptr<ArrowDOMWalker> walker;
+};
+
+class SimdParserContext : public ParserContext {
+ public:
+  static auto Make(const SimdOptions& opts, size_t num_parsers,
+                   std::shared_ptr<ParserContext>* out) -> Status;
+
+  auto parsers() -> std::vector<std::shared_ptr<Parser>> override;
+
+  [[nodiscard]] auto schema() const -> std::shared_ptr<arrow::Schema> override;
+
+ private:
+  SimdParserContext() = default;
+
+  std::vector<std::shared_ptr<SimdParser>> parsers_;
+  std::shared_ptr<arrow::Schema> schema_;
+};
+
+}  // namespace bolson::parse

@@ -383,6 +383,10 @@ auto Converter::Make(const ConverterOptions& opts, publish::IpcQueue* ipc_queue,
       BOLSON_ROE(
           parse::opae::TripParserContext::Make(opts.parser.opae_trip, &parser_context));
       break;
+    case parse::Impl::SIMD:
+      BOLSON_ROE(parse::SimdParserContext::Make(opts.parser.simd, opts.num_threads,
+                                                &parser_context));
+      break;
     case parse::Impl::SIMD_BATTERY:
       parse::simd::BatteryParserContext::Make(opts.parser.simd_battery, opts.num_threads,
                                               &parser_context);

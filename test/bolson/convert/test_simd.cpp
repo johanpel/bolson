@@ -17,7 +17,7 @@
 #include <simdjson.h>
 
 #include "bolson/convert/test_convert.h"
-#include "bolson/parse/simd/simd.h"
+#include "bolson/parse/simd.h"
 
 namespace bolson::convert {
 
@@ -31,8 +31,8 @@ TEST(Simd, Simple) {
   simdjson::dom::parser parser;
   simdjson::dom::document_stream parsed_objects = parser.parse_many(test_str);
 
-  std::shared_ptr<parse::simd::ArrowDOMWalker> walker;
-  parse::simd::ArrowDOMWalker::Make(schema, &walker);
+  std::shared_ptr<parse::ArrowDOMWalker> walker;
+  parse::ArrowDOMWalker::Make(schema, &walker);
 
   for (auto obj : parsed_objects) {
     FAIL_ON_ERROR(walker->Append(obj));
@@ -55,8 +55,8 @@ TEST(Simd, Battery) {
   simdjson::dom::parser parser;
   simdjson::dom::document_stream parsed_objects = parser.parse_many(test_str);
 
-  std::shared_ptr<parse::simd::ArrowDOMWalker> walker;
-  parse::simd::ArrowDOMWalker::Make(schema, &walker);
+  std::shared_ptr<parse::ArrowDOMWalker> walker;
+  parse::ArrowDOMWalker::Make(schema, &walker);
 
   for (auto obj : parsed_objects) {
     FAIL_ON_ERROR(walker->Append(obj));

@@ -106,11 +106,11 @@ add_compile_unit(
     src/bolson/convert/metrics.cpp
     src/bolson/parse/arrow.cpp
     src/bolson/parse/parser.cpp
+    src/bolson/parse/simd.cpp
     src/bolson/parse/opae/battery.cpp
     src/bolson/parse/opae/opae.cpp
     src/bolson/parse/opae/trip.cpp
     src/bolson/parse/simd/battery.cpp
-    src/bolson/parse/simd/simd.cpp
     src/bolson/publish/bench.cpp
     src/bolson/publish/metrics.cpp
     src/bolson/publish/publisher.cpp
