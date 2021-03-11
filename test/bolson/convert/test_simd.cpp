@@ -16,6 +16,8 @@
 #include <gtest/gtest.h>
 #include <simdjson.h>
 
+#include <list>
+
 #include "bolson/convert/test_convert.h"
 #include "bolson/parse/simd.h"
 
@@ -31,15 +33,15 @@ TEST(Simd, Simple) {
   simdjson::dom::parser parser;
   simdjson::dom::document_stream parsed_objects = parser.parse_many(test_str);
 
-  std::shared_ptr<parse::ArrowDOMWalker> walker;
-  parse::ArrowDOMWalker::Make(schema, &walker);
+  std::shared_ptr<parse::DOMVisitor> walker;
+  parse::DOMVisitor::Make(schema, &walker);
 
   for (auto obj : parsed_objects) {
     FAIL_ON_ERROR(walker->Append(obj));
   }
 
   std::shared_ptr<arrow::RecordBatch> batch;
-  walker->Finish(&batch);
+  FAIL_ON_ERROR(walker->Finish(&batch));
   // TODO: write check
   std::cout << batch->ToString() << std::endl;
 }
@@ -55,25 +57,52 @@ TEST(Simd, Battery) {
   simdjson::dom::parser parser;
   simdjson::dom::document_stream parsed_objects = parser.parse_many(test_str);
 
-  std::shared_ptr<parse::ArrowDOMWalker> walker;
-  parse::ArrowDOMWalker::Make(schema, &walker);
+  std::shared_ptr<parse::DOMVisitor> walker;
+  parse::DOMVisitor::Make(schema, &walker);
 
   for (auto obj : parsed_objects) {
     FAIL_ON_ERROR(walker->Append(obj));
   }
 
   std::shared_ptr<arrow::RecordBatch> batch;
-  walker->Finish(&batch);
+  FAIL_ON_ERROR(walker->Finish(&batch));
   // TODO: write check
   std::cout << batch->ToString() << std::endl;
 }
 
-struct DOMNode {
-  
-};
+TEST(Simd, DOMSequenceVisitor) {
+  auto schema = arrow::schema(
+      {arrow::field("a", arrow::int64()), arrow::field("b", arrow::list(arrow::int64())),
+       arrow::field(
+           "c", arrow::struct_(
+                    {arrow::field("d", arrow::int64()),
+                     arrow::field("e", arrow::list(arrow::struct_(
+                                           {arrow::field("f", arrow::int64()),
+                                            arrow::field("g", arrow::int64())})))}))});
 
-TEST(Simd, DOMWalkerSequence) {
+  parse::DOMSequenceVisitor v;
 
+  v.Analyze(*schema);
+
+  std::cout << v.ToString() << std::endl;
+
+  std::string test_str(
+      R"({"a":0,"b":[1,2,3],"c":{"d":4,"e":[{"f":5,"g":6},{"f":7,"g":8}]}}
+{"a":0,"b":[10,11],"c":{"d":12,"e":[{"f":13,"g":14}]}})");
+
+  simdjson::dom::parser parser;
+  simdjson::dom::document_stream parsed_objects = parser.parse_many(test_str);
+
+  for (auto elem : parsed_objects) {
+    auto obj = elem.get_object();
+    for (const auto& kv : obj) {
+      std::cout << kv.key << "=" << kv.value << std::endl;
+    }
+    for (const auto& node : v.nodes()) {
+      std::cout << node.name << ":";
+      std::cout << obj.at_pointer(node.name) << std::endl;
+    }
+  }
 }
 
 }  // namespace bolson::convert

@@ -65,7 +65,7 @@ auto SimdParser::Parse(const std::vector<illex::JSONBuffer*>& in,
 auto SimdParser::Make(const std::shared_ptr<arrow::Schema>& schema,
                       std::shared_ptr<SimdParser>* out) -> Status {
   auto result = std::shared_ptr<SimdParser>(new SimdParser());
-  BOLSON_ROE(ArrowDOMWalker::Make(schema, &result->walker));
+  BOLSON_ROE(DOMVisitor::Make(schema, &result->walker));
   *out = result;
   return Status::OK();
 }
@@ -137,9 +137,9 @@ inline auto TypeErrorStatus(sj::dom::element_type json, const arrow::DataType& a
                                       " with unsupported Arrow type " + arrow.name());
 }
 
-auto ArrowDOMWalker::AppendArrayAsList(const sj::dom::array& array,
-                                       const ArrowField& item_field,
-                                       arrow::ListBuilder* list_builder) -> Status {
+auto DOMVisitor::AppendArrayAsList(const sj::dom::array& array,
+                                   const ArrowField& item_field,
+                                   arrow::ListBuilder* list_builder) -> Status {
   assert(list_builder != nullptr);
 
   ARROW_ROE(list_builder->Append());
@@ -174,9 +174,9 @@ auto ArrowDOMWalker::AppendArrayAsList(const sj::dom::array& array,
   return Status::OK();
 }
 
-auto ArrowDOMWalker::AppendArrayAsFixedSizeList(const sj::dom::array& array,
-                                                const ArrowField& item_field,
-                                                arrow::FixedSizeListBuilder* fsl_builder)
+auto DOMVisitor::AppendArrayAsFixedSizeList(const sj::dom::array& array,
+                                            const ArrowField& item_field,
+                                            arrow::FixedSizeListBuilder* fsl_builder)
     -> Status {
   assert(fsl_builder != nullptr);
 
@@ -223,10 +223,9 @@ auto ArrowDOMWalker::AppendArrayAsFixedSizeList(const sj::dom::array& array,
   return Status::OK();
 }
 
-auto ArrowDOMWalker::AppendObjectAsStruct(const sj::dom::object& object,
-                                          const ArrowFields& expected_fields,
-                                          arrow::StructBuilder* struct_builder)
-    -> Status {
+auto DOMVisitor::AppendObjectAsStruct(const sj::dom::object& object,
+                                      const ArrowFields& expected_fields,
+                                      arrow::StructBuilder* struct_builder) -> Status {
   assert(struct_builder != nullptr);
   assert(expected_fields.size() == struct_builder->num_children());
 
@@ -252,9 +251,9 @@ auto ArrowDOMWalker::AppendObjectAsStruct(const sj::dom::object& object,
         static_cast<C_TYPE>(element.get_int64())));             \
   } break;
 
-auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
-                                   const ArrowField& expected_field,
-                                   arrow::ArrayBuilder* builder) -> Status {
+auto DOMVisitor::AppendElement(const sj::dom::element& element,
+                               const ArrowField& expected_field,
+                               arrow::ArrayBuilder* builder) -> Status {
   assert(builder != nullptr);
 
   switch (element.type()) {
@@ -343,8 +342,8 @@ auto ArrowDOMWalker::AppendElement(const sj::dom::element& element,
   return Status::OK();
 }  // namespace bolson::parse
 
-auto ArrowDOMWalker::AppendObjectAsRecord(const sj::dom::object& object,
-                                          arrow::RecordBatchBuilder* batch_builder)
+auto DOMVisitor::AppendObjectAsRecord(const sj::dom::object& object,
+                                      arrow::RecordBatchBuilder* batch_builder)
     -> Status {
   if (object.size() != batch_builder->schema()->num_fields()) {
     // Not present keys could also be interpreted as null values?
@@ -370,13 +369,115 @@ auto ArrowDOMWalker::AppendObjectAsRecord(const sj::dom::object& object,
   return Status::OK();
 }
 
-auto ArrowDOMWalker::Make(const std::shared_ptr<arrow::Schema>& schema,
-                          std::shared_ptr<ArrowDOMWalker>* out) -> Status {
-  auto result = std::shared_ptr<ArrowDOMWalker>(new ArrowDOMWalker());
+auto DOMVisitor::Make(const std::shared_ptr<arrow::Schema>& schema,
+                      std::shared_ptr<DOMVisitor>* out) -> Status {
+  auto result = std::shared_ptr<DOMVisitor>(new DOMVisitor());
   ARROW_ROE(arrow::RecordBatchBuilder::Make(schema, arrow::default_memory_pool(),
                                             &result->batch_builder));
   *out = result;
   return Status::OK();
+}
+
+auto DOMSequenceVisitor::Analyze(const arrow::Schema& schema) -> Status {
+  for (const auto& field : schema.fields()) {
+    VisitField(*field);
+  }
+  return Status::OK();
+}
+
+auto DOMSequenceVisitor::VisitField(const arrow::Field& field) -> Status {
+  path_.emplace_back(field.name());
+  VisitType(*field.type());
+  return Status::OK();
+}
+
+auto DOMSequenceVisitor::VisitType(const arrow::DataType& type) -> Status {
+  ARROW_ROE(type.Accept(this));
+  return Status::OK();
+}
+
+#define BOLSON_SIMD_PRIM_VISIT_IMPL(ARROW_TYPE)                                        \
+  auto DOMSequenceVisitor::Visit(const arrow::ARROW_TYPE##Type& type)->arrow::Status { \
+    nodes_.emplace_back(join(path_), std::make_shared<arrow::ARROW_TYPE##Builder>());  \
+    path_.clear();                                                                     \
+    return arrow::Status::OK();                                                        \
+  }
+
+BOLSON_SIMD_PRIM_VISIT_IMPL(Boolean);
+BOLSON_SIMD_PRIM_VISIT_IMPL(Int8);
+BOLSON_SIMD_PRIM_VISIT_IMPL(Int16);
+BOLSON_SIMD_PRIM_VISIT_IMPL(Int32);
+BOLSON_SIMD_PRIM_VISIT_IMPL(Int64);
+BOLSON_SIMD_PRIM_VISIT_IMPL(UInt8);
+BOLSON_SIMD_PRIM_VISIT_IMPL(UInt16);
+BOLSON_SIMD_PRIM_VISIT_IMPL(UInt32);
+BOLSON_SIMD_PRIM_VISIT_IMPL(UInt64);
+BOLSON_SIMD_PRIM_VISIT_IMPL(Double);
+BOLSON_SIMD_PRIM_VISIT_IMPL(String);
+
+auto DOMSequenceVisitor::Visit(const arrow::ListType& type) -> arrow::Status {
+  // Push back the node for the list builder.
+  // We can't construct the list builder yet, because we need the values builder first.
+  auto& this_node_ref = nodes_.emplace_back(join(path_));
+
+  // Get the iterator to the current node.
+  auto iter = nodes_.end()--;
+
+  // Walk down the tree.
+  VisitField(*type.value_field());
+
+  // Move to the child node that was appended.
+  // Construct the list builder, taking the child node builder.
+  this_node_ref.builder = std::make_shared<arrow::ListBuilder>(
+      arrow::default_memory_pool(), (++iter)->builder);
+
+  return arrow::Status::OK();
+}
+
+auto DOMSequenceVisitor::Visit(const arrow::StructType& type) -> arrow::Status {
+  // Push back the node for the struct builder.
+  // We can't construct the struct builder yet, because we need the values builders first.
+  auto& this_node_ref = nodes_.emplace_back(join(path_));
+  // Get the iterator to the current node.
+  auto iter = --nodes_.end();
+  // Make a copy of the current path, so we can restore it after visiting every field.
+  auto this_path = path_;
+
+  std::vector<std::shared_ptr<arrow::ArrayBuilder>> child_builders;
+
+  for (const auto& field : type.fields()) {
+    // Visit the child field.
+    VisitField(*field);
+    // Move to the child node.
+    // Push back a copy of the pointer to the child builder.
+    child_builders.push_back((++iter)->builder);
+    // Set the iterator to the last node.
+    iter = --nodes_.end();
+    // Restore the current path.
+    path_ = this_path;
+  }
+
+  // Create the struct builder and place it on the current node.
+  this_node_ref.builder = std::make_shared<arrow::StructBuilder>(
+      arrow::struct_(type.fields()), arrow::default_memory_pool(), child_builders);
+
+  return arrow::Status::OK();
+}
+
+auto DOMSequenceVisitor::ToString() const -> std::string {
+  std::ostringstream ss;
+  size_t longest = 0;
+  for (const auto& node : nodes_) {
+    if (node.name.length() > longest) {
+      longest = node.name.length();
+    }
+  }
+  for (const auto& node : nodes_) {
+    ss << std::left << std::setw(longest) << node.name << " : "
+       << (node.builder == nullptr ? "nullptr" : node.builder->type()->name())
+       << std::endl;
+  }
+  return ss.str();
 }
 
 }  // namespace bolson::parse
